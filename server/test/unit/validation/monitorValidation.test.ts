@@ -1,0 +1,801 @@
+import { describe, expect, it } from "@jest/globals";
+import { readFileSync } from "node:fs";
+import {
+	createMonitorBodyValidation,
+	editMonitorBodyValidation,
+	importMonitorsBodyValidation,
+	getDockerContainerLogsQueryValidation,
+} from "../../../src/api/validation/monitorValidation.ts";
+
+describe("getDockerContainerLogsQueryValidation", () => {
+	it("defaults limit to 20", () => {
+		expect(getDockerContainerLogsQueryValidation.parse({})).toEqual({ limit: 20 });
+	});
+
+	it("rejects a limit above 50", () => {
+		expect(() => getDockerContainerLogsQueryValidation.parse({ limit: 51 })).toThrow();
+	});
+
+	it("rejects a non-ISO before cursor", () => {
+		expect(() => getDockerContainerLogsQueryValidation.parse({ before: "yesterday" })).toThrow();
+	});
+
+	it("rejects a non-ISO after cursor", () => {
+		expect(() => getDockerContainerLogsQueryValidation.parse({ after: "yesterday" })).toThrow();
+	});
+
+	it("rejects before and after together", () => {
+		expect(() => getDockerContainerLogsQueryValidation.parse({ before: "2026-01-02T00:00:00.000Z", after: "2026-01-01T00:00:00.000Z" })).toThrow();
+	});
+});
+
+const baseDnsBody = {
+	name: "DNS check",
+	type: "dns" as const,
+	url: "example.com",
+};
+
+describe("monitorValidation — DNS fields", () => {
+	describe("createMonitorBodyValidation", () => {
+		it("retains dnsServer and dnsRecordType on a DNS monitor", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				...baseDnsBody,
+				dnsServer: "8.8.8.8",
+				dnsRecordType: "A",
+			});
+
+			expect(parsed.dnsServer).toBe("8.8.8.8");
+			expect(parsed.dnsRecordType).toBe("A");
+		});
+
+		it("accepts every supported DNS record type", () => {
+			for (const recordType of ["A", "AAAA", "CNAME", "MX", "TXT", "NS"] as const) {
+				const parsed = createMonitorBodyValidation.parse({
+					...baseDnsBody,
+					dnsServer: "1.1.1.1",
+					dnsRecordType: recordType,
+				});
+				expect(parsed.dnsRecordType).toBe(recordType);
+			}
+		});
+
+		it("rejects unknown DNS record types", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseDnsBody,
+					dnsServer: "8.8.8.8",
+					dnsRecordType: "BOGUS",
+				})
+			).toThrow();
+		});
+
+		it("treats DNS fields as optional (other monitor types still validate)", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				name: "HTTP check",
+				type: "http",
+				url: "https://example.com",
+			});
+
+			expect(parsed.dnsServer).toBeUndefined();
+			expect(parsed.dnsRecordType).toBeUndefined();
+		});
+
+		it("rejects a DNS monitor whose url has a scheme or path", () => {
+			for (const badUrl of ["https://example.com", "example.com/path", "example.com:53", " example.com"]) {
+				expect(() =>
+					createMonitorBodyValidation.parse({
+						...baseDnsBody,
+						url: badUrl,
+						dnsServer: "8.8.8.8",
+						dnsRecordType: "A",
+					})
+				).toThrow();
+			}
+		});
+
+		it("rejects a DNS monitor with an invalid dnsServer", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseDnsBody,
+					dnsServer: "not-an-ip",
+					dnsRecordType: "A",
+				})
+			).toThrow();
+		});
+
+		it("accepts service labels with leading underscore (DMARC, SRV, ACME)", () => {
+			for (const url of ["_dmarc.example.com", "_imaps._tcp.example.com", "_acme-challenge.example.com"]) {
+				const parsed = createMonitorBodyValidation.parse({
+					...baseDnsBody,
+					url,
+					dnsServer: "8.8.8.8",
+					dnsRecordType: "TXT",
+				});
+				expect(parsed.url).toBe(url);
+			}
+		});
+
+		it("does not enforce the hostname rule for non-DNS monitors", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				name: "HTTP check",
+				type: "http",
+				url: "https://example.com/some/path",
+			});
+
+			expect(parsed.url).toBe("https://example.com/some/path");
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("retains dnsServer and dnsRecordType on edits", () => {
+			const parsed = editMonitorBodyValidation.parse({
+				dnsServer: "1.1.1.1",
+				dnsRecordType: "MX",
+			});
+
+			expect(parsed.dnsServer).toBe("1.1.1.1");
+			expect(parsed.dnsRecordType).toBe("MX");
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("retains dnsServer and dnsRecordType on imported DNS monitors", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [
+					{
+						name: "Imported DNS",
+						type: "dns",
+						url: "example.com",
+						dnsServer: "8.8.4.4",
+						dnsRecordType: "TXT",
+					},
+				],
+			});
+
+			expect(parsed.monitors[0].dnsServer).toBe("8.8.4.4");
+			expect(parsed.monitors[0].dnsRecordType).toBe("TXT");
+		});
+	});
+});
+
+describe("monitorValidation — strategy gating", () => {
+	describe("createMonitorBodyValidation", () => {
+		it("accepts strategy on pagespeed monitors", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				name: "PS check",
+				type: "pagespeed",
+				url: "https://example.com",
+				strategy: "mobile",
+			});
+			expect(parsed.strategy).toBe("mobile");
+		});
+
+		it("accepts pagespeed monitors without a strategy", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				name: "PS check",
+				type: "pagespeed",
+				url: "https://example.com",
+			});
+			expect(parsed.strategy).toBeUndefined();
+		});
+
+		it("rejects strategy on non-pagespeed monitor types", () => {
+			for (const type of ["http", "ping", "docker", "port", "game", "grpc", "websocket", "dns", "hardware"] as const) {
+				expect(() =>
+					createMonitorBodyValidation.parse({
+						name: "wrong-type check",
+						type,
+						url: type === "dns" ? "example.com" : "https://example.com",
+						strategy: "desktop",
+					})
+				).toThrow();
+			}
+		});
+
+		it("allows non-pagespeed monitors without a strategy", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				name: "HTTP check",
+				type: "http",
+				url: "https://example.com",
+			});
+			expect(parsed.strategy).toBeUndefined();
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("rejects strategy when type is explicitly non-pagespeed", () => {
+			expect(() =>
+				editMonitorBodyValidation.parse({
+					type: "http",
+					strategy: "mobile",
+				})
+			).toThrow();
+		});
+
+		it("allows strategy when type is omitted (partial edit)", () => {
+			const parsed = editMonitorBodyValidation.parse({
+				strategy: "mobile",
+			});
+			expect(parsed.strategy).toBe("mobile");
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("does not inject a default strategy on imported HTTP monitors", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [
+					{
+						name: "Imported HTTP",
+						type: "http",
+						url: "https://example.com",
+					},
+				],
+			});
+			expect(parsed.monitors[0].strategy).toBeUndefined();
+		});
+
+		it("defaults dockerLogsEnabled to false on imported docker monitors", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [
+					{
+						name: "Imported Docker",
+						type: "docker",
+						url: "unix:///var/run/docker.sock",
+					},
+				],
+			});
+			expect(parsed.monitors[0].dockerLogsEnabled).toBe(false);
+		});
+
+		it("rejects strategy on imported non-pagespeed monitors", () => {
+			expect(() =>
+				importMonitorsBodyValidation.parse({
+					monitors: [
+						{
+							name: "Imported HTTP",
+							type: "http",
+							url: "https://example.com",
+							strategy: "desktop",
+						},
+					],
+				})
+			).toThrow();
+		});
+	});
+});
+
+describe("monitorValidation — HEAD method gating", () => {
+	const baseHead = {
+		name: "HEAD check",
+		type: "http" as const,
+		url: "https://example.com",
+		method: "HEAD" as const,
+	};
+
+	describe("createMonitorBodyValidation", () => {
+		it("accepts a HEAD monitor with no body matching", () => {
+			const parsed = createMonitorBodyValidation.parse(baseHead);
+			expect(parsed.method).toBe("HEAD");
+		});
+
+		it("accepts GET together with advanced matching", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				...baseHead,
+				method: "GET",
+				useAdvancedMatching: true,
+				jsonPath: "status",
+			});
+			expect(parsed.method).toBe("GET");
+		});
+
+		it("rejects HEAD combined with advanced matching", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHead, useAdvancedMatching: true })).toThrow();
+		});
+
+		it("rejects HEAD combined with a non-empty jsonPath", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHead, jsonPath: "status" })).toThrow();
+		});
+
+		it("allows HEAD with an empty-string jsonPath", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseHead, jsonPath: "" });
+			expect(parsed.method).toBe("HEAD");
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("rejects HEAD combined with advanced matching", () => {
+			expect(() => editMonitorBodyValidation.parse({ method: "HEAD", useAdvancedMatching: true })).toThrow();
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("rejects HEAD combined with a jsonPath on imported monitors", () => {
+			expect(() => importMonitorsBodyValidation.parse({ monitors: [{ ...baseHead, jsonPath: "status" }] })).toThrow();
+		});
+	});
+});
+
+describe("monitorValidation — regex pattern gating", () => {
+	const baseRegex = {
+		name: "regex check",
+		type: "http" as const,
+		url: "https://example.com",
+		useAdvancedMatching: true,
+		matchMethod: "regex" as const,
+	};
+
+	describe("createMonitorBodyValidation", () => {
+		it("accepts an RE2-supported regex pattern", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseRegex, expectedValue: "^2\\d{2}$" });
+			expect(parsed.expectedValue).toBe("^2\\d{2}$");
+		});
+
+		it("rejects a pattern using a backreference", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseRegex, expectedValue: "(a+)\\1" })).toThrow();
+		});
+
+		it("rejects a pattern using lookahead", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseRegex, expectedValue: "foo(?=bar)" })).toThrow();
+		});
+
+		it("ignores an invalid regex when matchMethod is not 'regex'", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseRegex, matchMethod: "include", expectedValue: "(a+)\\1" });
+			expect(parsed.expectedValue).toBe("(a+)\\1");
+		});
+
+		it("ignores an empty expectedValue", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseRegex, expectedValue: "" });
+			expect(parsed.matchMethod).toBe("regex");
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("rejects a pattern using a backreference", () => {
+			expect(() => editMonitorBodyValidation.parse({ matchMethod: "regex", expectedValue: "(a+)\\1" })).toThrow();
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("rejects a pattern using a backreference on imported monitors", () => {
+			expect(() => importMonitorsBodyValidation.parse({ monitors: [{ ...baseRegex, expectedValue: "(a+)\\1" }] })).toThrow();
+		});
+	});
+});
+
+describe("monitorValidation — customUpCodes", () => {
+	const baseHttpBody = {
+		name: "HTTP check",
+		type: "http" as const,
+		url: "https://example.com",
+	};
+
+	describe("createMonitorBodyValidation", () => {
+		it("accepts valid HTTP status codes", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				...baseHttpBody,
+				customUpCodes: [200, 301, 404, 503],
+			});
+			expect(parsed.customUpCodes).toEqual([200, 301, 404, 503]);
+		});
+
+		it("accepts non-standard HTTP status codes (Cloudflare, AWS ELB, etc.)", () => {
+			const parsed = createMonitorBodyValidation.parse({
+				...baseHttpBody,
+				customUpCodes: [419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561],
+			});
+			expect(parsed.customUpCodes).toEqual([419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561]);
+		});
+
+		it("rejects invalid HTTP status codes", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseHttpBody,
+					customUpCodes: [5000],
+				})
+			).toThrow();
+
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseHttpBody,
+					customUpCodes: [-1],
+				})
+			).toThrow();
+		});
+
+		it("rejects fractional or floating-point status codes", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseHttpBody,
+					customUpCodes: [200.5],
+				})
+			).toThrow();
+		});
+
+		it("rejects status codes below 100", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseHttpBody,
+					customUpCodes: [99],
+				})
+			).toThrow();
+		});
+
+		it("rejects valid-looking but mathematically unsupported status codes (e.g. 599)", () => {
+			expect(() =>
+				createMonitorBodyValidation.parse({
+					...baseHttpBody,
+					customUpCodes: [599], // Not in Node's default list nor our expanded list
+				})
+			).toThrow();
+		});
+
+		it("defaults to an empty array when not provided", () => {
+			const parsed = createMonitorBodyValidation.parse(baseHttpBody);
+			expect(parsed.customUpCodes).toEqual([]);
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("accepts valid HTTP status codes on edits", () => {
+			const parsed = editMonitorBodyValidation.parse({
+				customUpCodes: [200, 201],
+			});
+			expect(parsed.customUpCodes).toEqual([200, 201]);
+		});
+
+		it("accepts non-standard HTTP status codes on edits", () => {
+			const parsed = editMonitorBodyValidation.parse({
+				customUpCodes: [419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561],
+			});
+			expect(parsed.customUpCodes).toEqual([419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561]);
+		});
+
+		it("rejects invalid HTTP status codes on edits", () => {
+			expect(() =>
+				editMonitorBodyValidation.parse({
+					customUpCodes: [9999],
+				})
+			).toThrow();
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("retains valid HTTP status codes on imported HTTP monitors", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [
+					{
+						...baseHttpBody,
+						customUpCodes: [404],
+					},
+				],
+			});
+			expect(parsed.monitors[0].customUpCodes).toEqual([404]);
+		});
+
+		it("accepts non-standard HTTP status codes on imported HTTP monitors", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [
+					{
+						...baseHttpBody,
+						customUpCodes: [419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561],
+					},
+				],
+			});
+			expect(parsed.monitors[0].customUpCodes).toEqual([
+				419, 420, 440, 449, 460, 463, 497, 499, 509, 520, 521, 522, 523, 524, 525, 526, 527, 529, 530, 561,
+			]);
+		});
+
+		it("rejects invalid HTTP status codes on imported HTTP monitors", () => {
+			expect(() =>
+				importMonitorsBodyValidation.parse({
+					monitors: [
+						{
+							...baseHttpBody,
+							customUpCodes: [5000],
+						},
+					],
+				})
+			).toThrow();
+		});
+
+		it("defaults to an empty array when not provided on import", () => {
+			const parsed = importMonitorsBodyValidation.parse({
+				monitors: [baseHttpBody],
+			});
+			expect(parsed.monitors[0].customUpCodes).toEqual([]);
+		});
+	});
+});
+
+describe("monitorValidation — proxy fields", () => {
+	const baseHttpBody = {
+		name: "HTTP check",
+		type: "http" as const,
+		url: "https://example.com",
+	};
+	const PROXY_ID = "64b7a1f2c9e77a001a2b3c4d";
+
+	describe("createMonitorBodyValidation", () => {
+		it("defaults proxyMode to inherit", () => {
+			const parsed = createMonitorBodyValidation.parse(baseHttpBody);
+
+			expect(parsed.proxyMode).toBe("inherit");
+			expect(parsed.proxyId).toBeUndefined();
+		});
+
+		it("accepts custom mode with a proxyId", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode: "custom", proxyId: PROXY_ID });
+
+			expect(parsed.proxyMode).toBe("custom");
+			expect(parsed.proxyId).toBe(PROXY_ID);
+		});
+
+		it("rejects custom mode without a proxyId", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode: "custom" })).toThrow();
+		});
+
+		it("rejects custom mode with an empty-string proxyId", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode: "custom", proxyId: "" })).toThrow();
+		});
+
+		it("normalizes an empty-string proxyId to undefined on non-custom modes", () => {
+			for (const proxyMode of ["inherit", "none"] as const) {
+				const parsed = createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode, proxyId: "" });
+				expect(parsed.proxyId).toBeUndefined();
+			}
+		});
+
+		it("rejects a proxyId that is not a valid ObjectId", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode: "custom", proxyId: "proxy-1" })).toThrow();
+		});
+
+		it("rejects an unknown proxyMode", () => {
+			expect(() => createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode: "global" })).toThrow();
+		});
+
+		it("allows a stray proxyId on non-custom modes", () => {
+			for (const proxyMode of ["inherit", "none"] as const) {
+				const parsed = createMonitorBodyValidation.parse({ ...baseHttpBody, proxyMode, proxyId: PROXY_ID });
+				expect(parsed.proxyMode).toBe(proxyMode);
+			}
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("leaves proxyMode unset when omitted (no default injected on PATCH)", () => {
+			const parsed = editMonitorBodyValidation.parse({ name: "Renamed" });
+
+			expect(parsed.proxyMode).toBeUndefined();
+		});
+
+		it("rejects custom mode without a proxyId", () => {
+			expect(() => editMonitorBodyValidation.parse({ proxyMode: "custom" })).toThrow();
+		});
+
+		it("accepts custom mode with a proxyId", () => {
+			const parsed = editMonitorBodyValidation.parse({ proxyMode: "custom", proxyId: PROXY_ID });
+
+			expect(parsed.proxyId).toBe(PROXY_ID);
+		});
+
+		it("normalizes an empty-string proxyId to undefined", () => {
+			const parsed = editMonitorBodyValidation.parse({ proxyMode: "inherit", proxyId: "" });
+
+			expect(parsed.proxyId).toBeUndefined();
+		});
+
+		it("rejects a proxyId that is not a valid ObjectId", () => {
+			expect(() => editMonitorBodyValidation.parse({ proxyMode: "custom", proxyId: "not-an-object-id" })).toThrow();
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("defaults proxyMode to inherit on import", () => {
+			const parsed = importMonitorsBodyValidation.parse({ monitors: [baseHttpBody] });
+
+			expect(parsed.monitors[0].proxyMode).toBe("inherit");
+		});
+
+		it("rejects an imported monitor with custom mode and no proxyId", () => {
+			expect(() => importMonitorsBodyValidation.parse({ monitors: [{ ...baseHttpBody, proxyMode: "custom" }] })).toThrow();
+		});
+	});
+});
+
+describe("monitorValidation — Docker host url", () => {
+	const baseDockerBody = {
+		name: "Docker host check",
+		type: "docker" as const,
+		url: "unix:///var/run/docker.sock",
+	};
+
+	describe("createMonitorBodyValidation", () => {
+		it("accepts the default unix socket url", () => {
+			const parsed = createMonitorBodyValidation.parse(baseDockerBody);
+			expect(parsed.url).toBe("unix:///var/run/docker.sock");
+		});
+
+		it("accepts a bare absolute socket path", () => {
+			const parsed = createMonitorBodyValidation.parse({ ...baseDockerBody, url: "/run/docker.sock" });
+			expect(parsed.url).toBe("/run/docker.sock");
+		});
+
+		it("accepts tcp:// and https:// engine urls with an optional port and trailing slash", () => {
+			const fixture = (name: string) => readFileSync(new URL(`../../fixtures/docker-tls/${name}`, import.meta.url), "utf8");
+			const tlsFields = { dockerTlsCa: fixture("ca.pem"), dockerTlsCert: fixture("client-cert.pem"), dockerTlsKey: fixture("client-key.pem") };
+			for (const url of ["tcp://host", "tcp://host:2376", "https://host:2377", "tcp://host/"]) {
+				expect(createMonitorBodyValidation.parse({ ...baseDockerBody, ...tlsFields, url }).url).toBe(url);
+			}
+		});
+
+		it("rejects container names and unsupported engine urls", () => {
+			for (const badUrl of [
+				"my-container",
+				"http://host",
+				"host:2376",
+				"tcp://host/x",
+				"tcp://host:abc",
+				"ssh://deploy@host",
+				"unix://relative/path",
+				"",
+			]) {
+				expect(() => createMonitorBodyValidation.parse({ ...baseDockerBody, url: badUrl })).toThrow();
+			}
+		});
+
+		it("does not apply docker url rules to other monitor types", () => {
+			const parsed = createMonitorBodyValidation.parse({ name: "HTTP check", type: "http", url: "https://example.com" });
+			expect(parsed.url).toBe("https://example.com");
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("allows a docker edit without a url (partial edit)", () => {
+			const parsed = editMonitorBodyValidation.parse({ type: "docker", name: "renamed" });
+			expect(parsed.url).toBeUndefined();
+		});
+
+		it("rejects a docker edit with an invalid url", () => {
+			expect(() => editMonitorBodyValidation.parse({ type: "docker", url: "my-container" })).toThrow();
+		});
+
+		it("rejects a docker edit with an ssh url", () => {
+			expect(() => editMonitorBodyValidation.parse({ type: "docker", url: "ssh://deploy@host" })).toThrow();
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("accepts an imported docker monitor with a socket url", () => {
+			const parsed = importMonitorsBodyValidation.parse({ monitors: [baseDockerBody] });
+			expect(parsed.monitors[0].url).toBe("unix:///var/run/docker.sock");
+		});
+
+		it("rejects an imported docker monitor with a container-name url", () => {
+			expect(() => importMonitorsBodyValidation.parse({ monitors: [{ ...baseDockerBody, url: "my-container" }] })).toThrow();
+		});
+	});
+});
+
+describe("monitorValidation — Docker TLS credentials", () => {
+	const fixture = (name: string) => readFileSync(new URL(`../../fixtures/docker-tls/${name}`, import.meta.url), "utf8");
+	const CA = fixture("ca.pem");
+	const CLIENT_CERT = fixture("client-cert.pem");
+	const CLIENT_KEY = fixture("client-key.pem");
+	const OTHER_KEY = fixture("other-key.pem");
+	const ENCRYPTED_KEY = fixture("encrypted-key.pem");
+
+	const baseTlsBody = {
+		name: "Docker TLS check",
+		type: "docker" as const,
+		url: "tcp://host:2376",
+	};
+	const fullTlsBody = { ...baseTlsBody, dockerTlsCa: CA, dockerTlsCert: CLIENT_CERT, dockerTlsKey: CLIENT_KEY };
+
+	const issuesFor = (result: ReturnType<typeof createMonitorBodyValidation.safeParse>) =>
+		result.success ? [] : result.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }));
+
+	describe("createMonitorBodyValidation", () => {
+		it("accepts a CA, client certificate, and matching key", () => {
+			const parsed = createMonitorBodyValidation.parse(fullTlsBody);
+			expect(parsed.dockerTlsCa).toBe(CA);
+			expect(parsed.dockerTlsCert).toBe(CLIENT_CERT);
+			expect(parsed.dockerTlsKey).toBe(CLIENT_KEY);
+		});
+
+		it("does not require TLS fields for a socket url", () => {
+			expect(createMonitorBodyValidation.safeParse({ ...baseTlsBody, url: "unix:///var/run/docker.sock" }).success).toBe(true);
+		});
+
+		it("requires the client certificate, key, and CA for a TLS url", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse(baseTlsBody));
+			expect(issues).toEqual(
+				expect.arrayContaining([
+					{ path: "dockerTlsCert", message: "TLS certificate is required for a TLS Docker host" },
+					{ path: "dockerTlsKey", message: "TLS key is required for a TLS Docker host" },
+					{ path: "dockerTlsCa", message: "CA certificate is required unless TLS errors are ignored" },
+				])
+			);
+		});
+
+		it("makes the CA optional when TLS errors are ignored", () => {
+			const result = createMonitorBodyValidation.safeParse({
+				...baseTlsBody,
+				ignoreTlsErrors: true,
+				dockerTlsCert: CLIENT_CERT,
+				dockerTlsKey: CLIENT_KEY,
+			});
+			expect(result.success).toBe(true);
+		});
+
+		it("still requires the client certificate and key when TLS errors are ignored", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...baseTlsBody, ignoreTlsErrors: true }));
+			expect(issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["dockerTlsCert", "dockerTlsKey"]));
+			expect(issues.map((issue) => issue.path)).not.toContain("dockerTlsCa");
+		});
+
+		it("rejects a CA that is not a PEM certificate", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsCa: "not a certificate" }));
+			expect(issues).toEqual([{ path: "dockerTlsCa", message: "No certificate found; expected one or more PEM CERTIFICATE blocks" }]);
+		});
+
+		it("rejects a client certificate that is not a PEM certificate", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsCert: "not a certificate" }));
+			expect(issues).toEqual([{ path: "dockerTlsCert", message: "No certificate found; expected one or more PEM CERTIFICATE blocks" }]);
+		});
+
+		it("rejects a key that is not a PEM private key", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsKey: "not a key" }));
+			expect(issues).toEqual([{ path: "dockerTlsKey", message: "Private key is not valid PEM" }]);
+		});
+
+		it("rejects an encrypted private key", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsKey: ENCRYPTED_KEY }));
+			expect(issues).toEqual([{ path: "dockerTlsKey", message: "Encrypted private keys are not supported; remove the passphrase first" }]);
+		});
+
+		it("rejects a key that does not match the client certificate", () => {
+			const issues = issuesFor(createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsKey: OTHER_KEY }));
+			expect(issues).toEqual([{ path: "dockerTlsKey", message: "Key does not match certificate" }]);
+		});
+
+		it("accepts a CA bundle with more than one certificate", () => {
+			const result = createMonitorBodyValidation.safeParse({ ...fullTlsBody, dockerTlsCa: `${CA}\n${CLIENT_CERT}` });
+			expect(result.success).toBe(true);
+		});
+	});
+
+	describe("editMonitorBodyValidation", () => {
+		it("accepts a TLS url without a key so a stored key is kept", () => {
+			const result = editMonitorBodyValidation.safeParse({ ...baseTlsBody, dockerTlsCa: CA, dockerTlsCert: CLIENT_CERT });
+			expect(result.success).toBe(true);
+		});
+
+		it("accepts a blank key so a stored key is kept", () => {
+			const result = editMonitorBodyValidation.safeParse({ ...baseTlsBody, dockerTlsCa: CA, dockerTlsCert: CLIENT_CERT, dockerTlsKey: "" });
+			expect(result.success).toBe(true);
+		});
+
+		it("still requires the client certificate and CA", () => {
+			const issues = issuesFor(editMonitorBodyValidation.safeParse(baseTlsBody));
+			expect(issues.map((issue) => issue.path)).toEqual(expect.arrayContaining(["dockerTlsCert", "dockerTlsCa"]));
+			expect(issues.map((issue) => issue.path)).not.toContain("dockerTlsKey");
+		});
+
+		it("validates a replacement key against the client certificate", () => {
+			const issues = issuesFor(
+				editMonitorBodyValidation.safeParse({ ...baseTlsBody, dockerTlsCa: CA, dockerTlsCert: CLIENT_CERT, dockerTlsKey: OTHER_KEY })
+			);
+			expect(issues).toEqual([{ path: "dockerTlsKey", message: "Key does not match certificate" }]);
+		});
+	});
+
+	describe("importMonitorsBodyValidation", () => {
+		it("strips TLS credentials from imported monitors instead of validating them", () => {
+			const parsed = importMonitorsBodyValidation.parse({ monitors: [fullTlsBody] });
+			expect(parsed.monitors[0]).not.toHaveProperty("dockerTlsCa");
+			expect(parsed.monitors[0]).not.toHaveProperty("dockerTlsCert");
+			expect(parsed.monitors[0]).not.toHaveProperty("dockerTlsKey");
+		});
+	});
+});

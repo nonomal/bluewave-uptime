@@ -1,105 +1,326 @@
-
 # Contributing to Checkmate
 
-First off, thanks for taking the time to contribute! ❤️
+Thanks for your interest in contributing! Checkmate is an open-source, friendly project focused on learning and growth.
 
-All types of contributions are encouraged and valued. See the [Table of Contents](#table-of-contents) for different ways to help and details about how the Checkmate project handles them. Please make sure to read the relevant section before making your contribution. It will make it much easier for us maintainers and smooth out the experience for all involved. The community looks forward to your contributions. 🎉
+We truly appreciate all kinds of contributions — code, ideas, translations or documentation. Contributing helps you level up while making the project better for everyone.
 
-> And if you like the project, but don't have time to contribute, that's fine. There are other easy ways to support the project and show your appreciation, which we would also be very happy about:
-> - Star the project
-> - Tweet about it
-> - Refer this project in your project's readme
-> - Mention the project at local meetups and tell your friends/colleagues
+Before you start, please take a moment to read the relevant section. It helps us review and accept contributions faster, and makes the whole process smoother for everyone. 💚
 
-## Table of Contents
+PS: **We work closely with contributors on our [Discord channel](https://discord.com/invite/NAb6H3UTjK)**. You'll find community members, core maintainers, and first-timers helping each other out.
 
-- [I Have a Question](#i-have-a-question)
-- [I Want To Contribute](#i-want-to-contribute)
-- [Suggesting Enhancements](#suggesting-enhancements)
-
-## I Have a Question
-
-If you'd like to ask a question, we assume that you have read the available readme.md files. In the near future we'll come up with a proper installation and usage document.
-
-Before you ask a question, search for existing [Issues](/issues) that might help you. In case you have found a suitable issue and still need clarification, you can write your question in this issue. It is also advisable to search the internet for answers first.
-
-If you then still feel the need to ask a question and need clarification, we recommend the following:
-
-- Open an [Issue](/issues/new).
-- Provide as much context as you can about what you're running into.
-- Provide project and platform versions (NodeJs, MongoDB, etc), depending on what seems relevant.
-
-We will then take care of the issue as soon as possible.
+---
 
 
-## I Want To Contribute
+## 🚀 Quick Setup Checklist
 
-> ### Legal Notice 
-> When contributing to this project, you must agree that you have authored 100% of the content, that you have the necessary rights to the content and that the content you contribute may be provided under the project license.
+Before you dive in, make sure you have these installed:
 
-### Reporting Bugs
+```bash
+# Check Node.js (v20+ required)
+node --version
 
-#### Before Submitting a Bug Report
+# Check npm
+npm --version
 
-A good bug report shouldn't leave others needing to chase you up for more information. Therefore, we ask you to investigate carefully, collect information and describe the issue in detail in your report. Please complete the following steps in advance to help us fix any potential bug as fast as possible.
+# Check Docker
+docker --version
 
+# Check Git
+git --version
+```
+
+**New to contributing?** Start here:
+1. Pick a [`good-first-issue`](https://github.com/bluewave-labs/checkmate/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+2. Comment that you'd like to work on it
+3. Follow the [setup guide](#set-up-checkmate-locally) below
+4. Join our [Discord](https://discord.com/invite/NAb6H3UTjK) if you get stuck
+
+## Table of contents
+
+- [How do I...?](#how-do-i)
+  - [Get help or ask a question?](#get-help-or-ask-a-question)
+  - [Report a bug?](#report-a-bug)
+  - [Suggest a new feature?](#suggest-a-new-feature)
+  - [Set up Checkmate locally?](#set-up-checkmate-locally)
+  - [Start contributing code?](#start-contributing-code)
+  - [Improve the documentation?](#improve-the-documentation)
+  - [Help with translations?](#help-with-translations)
+  - [Submit a pull request?](#submit-a-pull-request)
+- [Code guidelines](#code-guidelines)
+- [Pull request checklist](#pull-request-checklist)
+- [Branching model](#branching-model)
+- [Thank you](#thank-you)
+
+---
+
+## How do I...
+
+### Get help or ask a question?
+
+Ask anything in our [Discord server](https://discord.com/invite/NAb6H3UTjK) — we're friendly and happy to help. [Our core contributors](https://github.com/bluewave-labs/checkmate?tab=readme-ov-file#-contributing) are active and ready to support you. You can also use [GitHub Discussions](https://github.com/bluewave-labs/Checkmate/discussions) section to ask your questions.
+
+### Report a bug?
+
+1. Search [existing issues](https://github.com/bluewave-labs/checkmate/issues).
+2. If it's not listed, open a **new issue**.
+3. Include as much detail as possible: what happened, what you expected, and steps to reproduce. Logs and screenshots help.
+
+### Suggest a new feature?
+
+1. Open a new issue with the **feature request** template.
+2. Share your use case and why it would help.
+3. You can discuss it in [Discord](https://discord.com/invite/NAb6H3UTjK) before you code.
+
+### Set up Checkmate locally?
+
+#### Prerequisites
+
+- Node.js (with npm)
+- Docker 
+- Git
+
+#### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/bluewave-labs/Checkmate.git
+cd Checkmate
+```
+
+#### Step 2: Set Up Docker Containers (MongoDB)
+
+Run MongoDB container:
+
+```bash
+docker run -d -p 27017:27017 -v uptime_mongo_data:/data/db --name uptime_database_mongo mongo:8.0
+```
+
+#### Step 3: Set Up the Backend (Server)
+
+Navigate to the server directory:
+
+```bash
+cd server
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Create a `.env` file in the `server` directory with the following minimum required configuration:
+
+```env
+CLIENT_HOST="http://localhost:5173"
+JWT_SECRET="my_secret_key_change_this"
+DB_CONNECTION_STRING="mongodb://localhost:27017/uptime_db"
+TOKEN_TTL="99d"
+ORIGIN="localhost"
+LOG_LEVEL="debug"
+```
+
+**Environment Variables Explained:**
+
+- `CLIENT_HOST`: Frontend URL (default: http://localhost:5173)
+- `JWT_SECRET`: Secret key for JWT tokens (change to something secure)
+- `DB_CONNECTION_STRING`: MongoDB connection URL
+- `ORIGIN`: Origin for CORS purposes
+- `TOKEN_TTL`: Token time to live (in vercel/ms format)
+- `LOG_LEVEL`: Debug level (debug, info, warn, error)
+- `QUEUE_TYPE`: Job queue implementation (`superSimpleQueue` or `lessSimpleQueue`, optional, default: `superSimpleQueue`)
+
+Start the backend server:
+
+```bash
+npm run dev
+```
+
+The server will run at `http://localhost:52345`.
+
+#### Step 4: Set Up the Frontend (Client)
+
+Open a new terminal window and navigate to the client directory from the root:
+
+```bash
+cd client
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Create a `.env` file in the `client` directory:
+
+```env
+VITE_APP_API_BASE_URL="http://localhost:52345/api/v1"
+VITE_APP_LOG_LEVEL="debug"
+```
+
+**Environment Variables Explained:**
+
+- `VITE_APP_API_BASE_URL`: Backend API URL
+- `VITE_APP_LOG_LEVEL`: Log level (none, error, warn, debug, info)
+
+Start the frontend:
+
+```bash
+npm run dev
+```
+
+The client will run at `http://localhost:5173`.  
+
+#### Step 5: Access the Application
+
+Open your browser and navigate to:
+
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:52345
+- **API Documentation**: http://localhost:52345/api-docs
+
+#### Managing Docker Containers
+
+Stop containers:
+
+```bash
+docker stop uptime_database_mongo
+```
+
+Start containers:
+
+```bash
+docker start uptime_database_mongo
+```
+
+Remove containers (if needed):
+
+```bash
+docker rm uptime_database_mongo
+```
+
+#### Troubleshooting
+
+**Port already in use:**
+
+- Check if another service is using ports 5173, 52345, 27017, or 6379
+- Stop the conflicting service or change the port in `.env` files
+
+**MongoDB connection issues:**
+
+- Verify container is running: `docker ps`
+- Check container logs: `docker logs uptime_database_mongo` 
+
+**Module not found errors:**
+
+- Ensure you ran `npm install` in both `client` and `server` directories
+
+**Need more help?**
+
+- Check the [full documentation](https://checkmate.so/docs)
+- Ask on [Discord](https://discord.com/invite/NAb6H3UTjK)
+
+### Start contributing code?
+
+1. Pick or open an issue (check `good-first-issue`s first)
+2. (optional but highly suggested) Read a detailed structure of [Checkmate](https://deepwiki.com/bluewave-labs/Checkmate) if you would like to deep dive into the architecture.
+3. Ask to be assigned. If there is already someone assigned and it's been more than 7 days, you can raise the flag and ask to be assigned as well.
+4. Create a branch from `develop`.
+5. Write your code.
+6. Run and test locally.
+7. Open a PR to `develop`.
+
+Start with [good first issues](https://github.com/bluewave-labs/checkmate/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+
+### Improve the documentation?
+
+Documentation contributions are very welcome — fixing a typo, clarifying a step, or adding a missing example is a valuable PR.
+
+- Small edits (typos, wording, formatting): open a PR directly against `develop`.
+- Larger changes (restructuring a section, adding a new guide): open an issue first so we can align on scope, then a PR.
+- Screenshots are helpful when documenting UI behaviour.
+- README translations live in `docs/translations/`. If you're adding a new language, please also add a flag + link to the language bar in the root `README.md` and every existing translated README so they stay in sync.
+
+### Help with translations?
+
+The application uses `i18next` with one JSON file per language under `client/src/locales/` (`en.json` is the source of truth). English source strings are the definitive copy; other languages are generated as one-time machine translations that anyone is welcome to refine.
+
+**To improve an existing language:**
+
+1. Edit the relevant `client/src/locales/<code>.json` file directly.
+2. Keep the JSON key structure identical to `en.json` — only translate the string values.
+3. Open a PR against `develop`. No language-selector code changes are needed.
+
+**To add a new language:**
+
+1. Add `client/src/locales/<code>.json` with the same key structure as `en.json`, translated. If you can't translate every key, leave unfamiliar strings in English rather than removing keys — i18next falls back to the key path when a value is missing.
+2. Add the display name to `languageNames` in `client/src/Components/inputs/LanguageSelector.tsx` (e.g. `it: "Italiano"`). The selector picks up any language present in `resources` automatically.
+3. Open a PR against `develop`.
+
+If translating a whole file is more than you want to take on, open an issue asking us to add the language and we'll generate an initial machine-translated file that you (or others) can refine over time.
+
+**Note:** an older workflow that synced translations with PoEditor is still in the repo but no longer authoritative. Please treat the `.json` files in `client/src/locales/` as the source of truth.
+
+### Submit a pull request?
+
+Follow the [pull request checklist](#pull-request-checklist). Your PR should:
+
+- Be focused on one issue.
+- Be tested locally.
+- Use our linting and translation rules.
+- Include the related issue (e.g. `Fixes #123`).
+- Be opened against the `develop` branch.
+
+---
+
+## Code guidelines
+
+- Use ESLint and Prettier. Run `npm run lint` and `npm run format-check` in both `client` and `server`. If `format-check` reports issues, fix them with `npm run format` before committing.
+- Follow naming conventions: `camelCase` for variables, `PascalCase` for components, `UPPER_CASE` for constants.
+- No hard-coded strings — use `t('your.key')` for everything visible.
+- Use the shared theme and components. No magic numbers or hardcoded styles.
+- Follow structure and patterns already used in the codebase.
+
+---
+
+## Pull request checklist
+
+Before submitting your pull request, please confirm the following:
+
+- **You have tested the app locally and confirmed your changes work.**
+- You reviewed your code and removed debug logs or leftover code.
+- The GitHub issue is assigned to you.
+- You included the related issue number in the PR description (e.g. `Fixes #123`).
+- All user-facing text uses the translation function `t('key')`; no hardcoded strings.
+- You avoided hardcoded URLs, config values, or sensitive data.
+- You used the shared theme for any styling — no magic numbers or inline styles.
+- The pull request addresses only one issue or topic.
+- You added screenshots or a video for any UI-related changes.
+- Your code passes `npm run lint`, `npm run format-check`, and `npm run build` in both `client` and `server` with no errors.
+
+If one or more of these are missing, we may ask you to update your pull request before we can merge it.
+
+---
+
+## Branching model
+
+- Code contributions should go to the `develop` branch.
+- `master` is used for stable releases.
+- Use descriptive branch names, like `fix/login-error` or `feat/add-alerts`.
 - Make sure that you are using the latest version.
-- Determine if your bug is really a bug and not an error on your side e.g. using incompatible environment components/versions. If you are looking for support, you might want to check [this section](#i-have-a-question)).
-- To see if other users have experienced (and potentially already solved) the same issue you are having, check if there is not already a bug report existing for your bug or error in the [bug tracker](issues?q=label%3Abug).
-- Also make sure to search the internet (including Stack Overflow) to see if users outside of the GitHub community have discussed the issue.
-- Collect information about the bug:
-- Stack trace (Traceback)
-- OS, Platform and Version (Windows, Linux, macOS, x86, ARM)
-- Version of the interpreter, compiler, SDK, runtime environment and package manager, depending on what seems relevant.
-- Possibly your input and the output
-- Can you reliably reproduce the issue? And can you also reproduce it with older versions?
-
-
-#### How Do I Submit a Good Bug Report?
-
-> You must never report security related issues, vulnerabilities or bugs including sensitive information to the issue tracker, or elsewhere in public. Instead sensitive bugs must be sent by email to security@bluewavelabs.ca
-
-We use GitHub issues to track bugs and errors. If you run into an issue with the project:
-
-- Open an [Issue](/issues/new). (Since we can't be sure at this point whether it is a bug or not, we ask you not to talk about a bug yet and not to label the issue.)
-- Explain the behaviour you would expect and the actual behaviour.
-- Please provide as much context as possible and describe the *reproduction steps* that someone else can follow to recreate the issue on their own. This usually includes your code. For good bug reports, you should isolate the problem and create a reduced test case.
-- Provide the information you collected in the previous section.
-
-Once it's filed:
-
-- The project team will label the issue accordingly.
-- A team member will try to reproduce the issue with your provided steps. If there are no reproduction steps or no obvious way to reproduce the issue, the team will ask you for those steps and mark the issue as `needs-repro`. Bugs with the `needs-repro` tag will not be addressed until they are reproduced.
-- If the team is able to reproduce the issue, it will be marked `needs-fix`, as well as possibly other tags (such as `critical`), and the issue will be left to be [implemented by someone](#your-first-code-contribution).
-
-## Suggesting Enhancements
-
-This section guides you through submitting an enhancement suggestion for the application, **including completely new features and minor improvements to existing functionality**. Following these guidelines will help maintainers and the community understand your enhancements and find related suggestions.
-
-- Make sure that you are using the latest version.
-- Make sure you run the code locally. The Checkmate [documentation](https://bluewavelabs.gitbook.io/checkmate) covers it.
+- Make sure you run the code locally. The Checkmate [documentation](https://checkmate.so/docs) covers it.
 - Find out if the functionality is already covered, maybe by an individual configuration.
 - Perform a [search](/issues) to see if the enhancement has already been suggested. If it has, add a comment to the existing issue instead of opening a new one.
 - Find out whether your idea fits with the scope and aims of the project. It's up to you to make a strong case to convince the project's developers of the merits of this feature. Keep in mind that we want features that will be useful to the majority of our users and not just a small subset. If you're just targeting a minority of users, consider writing an add-on/plugin library.
 
-#### How Do I Submit a Good Enhancement Suggestion?
+---
 
-Enhancement suggestions are tracked as [GitHub issues](/issues).
+## Thank you
 
-- Use a **clear and descriptive title** for the issue to identify the suggestion.
-- Provide a **step-by-step description of the suggested enhancement** in as many details as possible.
-- **Describe the current behavior** and **explain which behavior you expected to see instead** and why. At this point you can also tell which alternatives do not work for you.
-- You may want to **include screenshots and animated GIFs** which help you demonstrate the steps or point out the part which the suggestion is related to.
-- **Explain why this enhancement would be useful** to most CONTRIBUTING.md users. You may also want to point out the other projects that solved it better and which could serve as inspiration.
+Thanks for making Checkmate better. We mean it. Whether it's your first pull request or your 50th, we're excited to build with you.
 
-We have a Figma file that includes: 
+PS: feel free to introduce yourself on [Discord](https://discord.gg/NAb6H3UTjK) and say hi.
 
-- All the dashboard elements and components
-- The design guideline for the app
+-- Checkmate team
 
-You can see it [here](https://www.figma.com/design/RPSfaw66HjzSwzntKcgDUV/Uptime-Genie?node-id=0-1&t=WqOFv9jqNTFGItpL-1). Since it is read-only, we encourage you to copy to your own Figma page, then work on it.
- 
-[This document](https://docs.google.com/document/d/1Gy3LiimGUNoSiWAMbwyK3SeMADcCMjCLu6cQYoawtSE/edit#heading=h.1lj2lgut6m7h) outlines the process every developer should follow for managing the issues lifecycle. Also make sure you read the [document about how to make a good pull request](/PULLREQUESTS.md).
-
-## Attribution
-This guide is based on the **contributing.md**. [Make your own](https://contributing.md/)!
+Also make sure you read the [document about how to make a good pull request](/PULLREQUESTS.md).
